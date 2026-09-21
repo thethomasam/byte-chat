@@ -4,154 +4,168 @@ HOW A TOKENIZER WORKS -- explained with a tiny hand-checkable example.
 This is Byte Pair Encoding (BPE), the method behind the tokenizers used by
 GPT, Claude, Llama and essentially every modern language model.
 
-    python3 explain_tokenizer.py
+THE PROBLEM
+    A neural network can only do maths. It cannot read letters.
+    So before anything else, text has to become numbers.
+
+ATTEMPT 1 -- one number per letter
+    Simplest idea: a=1, b=2, c=3 ... It works. But our 42-letter sentence
+    then needs 42 numbers. That is wasteful: the model reads a fixed number
+    of pieces at a time, so short pieces mean less text fits. We want FEWER
+    pieces.
+
+THE IDEA -- glue common pairs together
+    Some pairs of letters turn up constantly: 'th', 'he', 'at'. Give each
+    common pair its own number, and you need fewer numbers.
+
+    How do we find which pairs are common?  We count.
+
+    python3 tokeniser.py
 """
 import collections
 
 TEXT = "the cat sat on the mat the cat ate the rat"
 ROUNDS = 6
 
-def title(t):
-    print(f"\n\n{'='*64}\n  {t}\n{'='*64}")
+
+def split_words(text):
+    """STEP 1 -- chop the text into words.
+
+    The spaces stay attached to the front of each word. That is how we can
+    glue it back together later with no guesswork.
+
+    Returns:
+        list[str] -- one entry per word slot, repeats included.
+        "the cat sat ..." -> ['the', ' cat', ' sat', ' on', ' the', ...]
+    """
+    return [(" " + word if index else word)
+            for index, word in enumerate(text.split(" "))]
 
 
-title("THE PROBLEM")
-print("""
-A neural network can only do maths. It cannot read letters.
-So before anything else, text has to become numbers.
-""")
-print(f'   our text:  "{TEXT}"')
+def count_words(words_list):
+    """STEP 2 -- count how often each word appears.
+
+    We store each word ONCE with a count, instead of a long list with
+    repeats. Same information, less to walk through -- 11 slots become 8
+    unique words here.
+
+    Returns:
+        Counter[str, int] -- word -> how many times it appears.
+        Counter({' the': 3, ' cat': 2, 'the': 1, ' sat': 1, ...})
+    """
+    return collections.Counter(words_list)
 
 
-title("ATTEMPT 1 -- one number per letter")
-print("""
-Simplest idea: a=1, b=2, c=3 ... It works. But look how many
-numbers you need for such a short sentence.
-""")
-print(f"   {len(TEXT)} letters  ->  {len(TEXT)} numbers")
-print(f"   {list(TEXT[:14])} ...")
-print("""
-That is wasteful. The model reads a fixed number of pieces at a
-time, so short pieces mean less text fits. We want FEWER pieces.
-""")
+def to_letters(counts):
+    """STEP 3 -- break words into letters, keep the counts.
+
+    Returns:
+        dict[tuple[str, ...], int] -- letters of the word -> its count.
+        {('t','h','e'): 1, (' ','c','a','t'): 2, ...}
+    """
+    return {tuple(word): count for word, count in counts.items()}
 
 
-title("THE IDEA -- glue common pairs together")
-print("""
-Some pairs of letters turn up constantly: 'th', 'he', 'at'.
-Give each common pair its own number, and you need fewer numbers.
+def train(words, rounds):
+    """STEP 4 -- the merge loop  (this is the whole algorithm).
 
-How do we find which pairs are common?  We count.
-""")
+    Repeat:
+        1. count every pair of NEIGHBOURS
+        2. glue the most common pair into one piece
 
+    A word's count rides along into every pair it contains, so the
+    deduplication from STEP 2 costs nothing in accuracy.
 
-title("STEP 1 -- chop the text into words")
-words_list = [(" " + w if i else w) for i, w in enumerate(TEXT.split(" "))]
-print(f"\n   {words_list}")
-print("""
-   Note the spaces stay attached to the front of each word.
-   That is how we can glue it back together later with no guesswork.
-""")
+    STEP 5 -- what comes out is the dictionary. That is all a "trained
+    tokenizer" is: a list of pieces. No AI, no learning -- just counting
+    and gluing.
 
+    Returns:
+        dict[str, int] -- piece -> its id, in the order they were learned.
+        {'at': 256, 'th': 257, 'the': 258, ' the': 259, ' c': 260, ' cat': 261}
+    """
+    vocab = {}
+    for round in range(1, rounds + 1):
+        pair_counts = collections.Counter()
+        for word, count in words.items():
+            for pair in zip(word, word[1:]):
+                pair_counts[pair] += count   # the word's count comes along so we don't have to revisit this 
 
-title("STEP 2 -- count how often each word appears")
-counts = collections.Counter(words_list)
-for w, n in counts.most_common():
-    print(f"   {w!r:>8}  x{n}")
-print("""
-   We store each word ONCE with a count, instead of a long list
-   with repeats. Same information, less to walk through.
-""")
+        (left, right), _ = pair_counts.most_common(1)[0] # in real-life scenario most_common use a heap underneath to reduce the search complexity 
+        glued = left + right
+        vocab[glued] = 256 + round - 1
 
+        merged_words = {}
+        for word, count in words.items():
+            index, pieces = 0, []
+            while index < len(word):
+                if (index < len(word) - 1
+                        and word[index] == left
+                        and word[index + 1] == right):
+                    pieces.append(glued); index += 2 # because we fetched for most common pairs
+                else:
+                    pieces.append(word[index]); index += 1
+            merged_words[tuple(pieces)] = count
 
-title("STEP 3 -- break words into letters, keep the counts")
-words = {tuple(w): n for w, n in counts.items()}
-for w, n in list(words.items())[:4]:
-    print(f"   {list(w)}  x{n}")
-print("   ...")
-
-
-title("STEP 4 -- the merge loop  (this is the whole algorithm)")
-print("""
-   Repeat:
-       1. count every pair of NEIGHBOURS
-       2. glue the most common pair into one piece
-""")
-vocab = {}
-for r in range(1, ROUNDS + 1):
-    pairs = collections.Counter()
-    for w, n in words.items():
-        for pair in zip(w, w[1:]):
-            pairs[pair] += n              # <- +n : the word's count comes along
-
-    (a, b), n = pairs.most_common(1)[0]
-    glued = a + b
-    vocab[glued] = 256 + r - 1
-
-    top = ", ".join(f"{x+y!r}:{c}" for (x, y), c in pairs.most_common(3))
-    print(f"\n   ROUND {r}   most common pairs -> {top}")
-    print(f"           WINNER {a!r}+{b!r} seen {n}x  ->  new piece {glued!r}")
-
-    new = {}
-    for w, c in words.items():
-        i, out = 0, []
-        while i < len(w):
-            if i < len(w) - 1 and w[i] == a and w[i + 1] == b:
-                out.append(glued); i += 2
-            else:
-                out.append(w[i]); i += 1
-        new[tuple(out)] = c
-    words = new
-    print(f"           text is now: {[list(w) for w in list(words)[:3]]} ...")
+        words = merged_words
+    return vocab
 
 
-title("STEP 5 -- the dictionary we just built")
-print("""
-   That is all a "trained tokenizer" is. A list of pieces.
-   No AI, no learning -- just counting and gluing.
-""")
-for piece, num in vocab.items():
-    print(f"   {piece!r:>8}  =  {num}")
+def encode(text, vocab):
+    """STEP 6 -- use it: glue pairs back together, earliest-learned first.
 
-
-title("STEP 6 -- use it")
-def encode(s):
-    """glue pairs back together, earliest-learned first"""
-    out = list(s)
+    Returns:
+        list[str] -- the pieces text is made of; anything unlearned stays a
+        single letter, so encoding never fails.
+        "the cat" -> ['the', ' cat']
+    """
+    pieces = list(text)
     for piece in vocab:                       # vocab is in learned order
-        i = 0
-        while i < len(out) - 1:
-            if out[i] + out[i + 1] == piece:
-                out[i:i + 2] = [piece]
+        index = 0
+        while index < len(pieces) - 1:
+            if pieces[index] + pieces[index + 1] == piece:
+                pieces[index:index + 2] = [piece]
             else:
-                i += 1
-    return out
-
-for s in ["the cat", "the rat sat"]:
-    pieces = encode(s)
-    ids = [vocab.get(p, ord(p[0])) for p in pieces]
-    print(f"\n   text    {s!r}")
-    print(f"   pieces  {pieces}")
-    print(f"   numbers {ids}")
-    print(f"   {len(s)} letters -> {len(pieces)} pieces")
+                index += 1
+    return pieces
 
 
-title("THE POINT")
-before, after = len(TEXT), len(encode(TEXT))
-print(f"""
-   Before:  {before} pieces   (one per letter)
-   After:   {after} pieces   (after {ROUNDS} merges)
+def main():
+    """THE POINT.
 
-   A real tokenizer does exactly this, just bigger:
-       {32503:,} rounds instead of {ROUNDS}
-       2,000,000,000 characters instead of {len(TEXT)}
-       a dictionary of 32,768 pieces instead of {ROUNDS}
+    42 pieces (one per letter) become 21 pieces after 6 merges.
 
-   The payoff: English text then needs about 4.8x fewer numbers
-   than doing it letter by letter.
+    A real tokenizer does exactly this, just bigger: ~32,503 rounds over
+    ~2,000,000,000 characters, giving a dictionary of 32,768 pieces. The
+    payoff: English text then needs about 4.8x fewer numbers than doing it
+    letter by letter.
 
-   That is the entire job:
-       common words  ->  one number
-       rare words    ->  a few numbers
-       anything else ->  falls back to single letters, so nothing ever fails
-""")
+    That is the entire job:
+        common words  ->  one number
+        rare words    ->  a few numbers
+        anything else ->  falls back to single letters, so nothing ever fails
+
+    Returns:
+        None -- prints the learned vocabulary, two worked encodings, and
+        the before/after piece count.
+    """
+    words = to_letters(count_words(split_words(TEXT)))
+    vocab = train(words, ROUNDS)
+
+    for piece, piece_id in vocab.items():
+        print(f"   {piece!r:>8}  =  {piece_id}")
+
+    for sample in ["the cat", "the rat sat"]:
+        pieces = encode(sample, vocab)
+        ids = [vocab.get(piece, ord(piece[0])) for piece in pieces]
+        print(f"\n   text    {sample!r}")
+        print(f"   pieces  {pieces}")
+        print(f"   numbers {ids}")
+        print(f"   {len(sample)} letters -> {len(pieces)} pieces")
+
+    print(f"\n   whole text: {len(TEXT)} letters -> "
+          f"{len(encode(TEXT, vocab))} pieces after {ROUNDS} merges")
+
+
+if __name__ == "__main__":
+    main()
