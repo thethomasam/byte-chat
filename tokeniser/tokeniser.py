@@ -1,26 +1,28 @@
 """
-HOW A TOKENIZER WORKS -- explained with a tiny hand-checkable example.
+This is my simple explanation on how tokenisers work. We know there is a lot of jargon around how LLM work behind the curtain. 
+Bamm!! ths is the first step towards the jagron."Tokenisation".
 
-This is Byte Pair Encoding (BPE), the method behind the tokenizers used by
-GPT, Claude, Llama and essentially every modern language model.
+The idea behind tokenisation is Large Language Models(LLMs) don't understand words so we need to figure out a way to convert 
+these words to number so that the model understands the semantic meaning behind words and memorise their relationship;p
 
-THE PROBLEM
-    A neural network can only do maths. It cannot read letters.
-    So before anything else, text has to become numbers.
+So tokenisations does this by assigning token a number to each char so that means if I want to say "i love llms" 
+and each char has a number assigned then 
+1=23
+l=45..... and so far so on
 
-ATTEMPT 1 -- one number per letter
-    Simplest idea: a=1, b=2, c=3 ... It works. But our 42-letter sentence
-    then needs 42 numbers. That is wasteful: the model reads a fixed number
-    of pieces at a time, so short pieces mean less text fits. We want FEWER
-    pieces.
+[23, 34, 45,46, 56,58,........] so that would cause a long list of numbers to accommodate a simple sentence. 
 
-THE IDEA -- glue common pairs together
-    Some pairs of letters turn up constantly: 'th', 'he', 'at'. Give each
-    common pair its own number, and you need fewer numbers.
+Therefore a smarter way is to learn the pattern of what words come together and assign them a token number so like if I have corpus of things i love
 
-    How do we find which pairs are common?  We count.
+1. i love llms
+2. i love mamba
+3. i love grasshpper
+4. sometimes love lion
+5. I hate icecream
 
-    python3 tokeniser.py
+we might observe a pattern that "i love" comes together a lot so why not assign them a a token number
+thats essentially what Byte Pair Encoding does.
+
 """
 import collections
 
@@ -30,9 +32,6 @@ ROUNDS = 6
 
 def split_words(text):
     """STEP 1 -- chop the text into words.
-
-    The spaces stay attached to the front of each word. That is how we can
-    glue it back together later with no guesswork.
 
     Returns:
         list[str] -- one entry per word slot, repeats included.
@@ -44,10 +43,6 @@ def split_words(text):
 
 def count_words(words_list):
     """STEP 2 -- count how often each word appears.
-
-    We store each word ONCE with a count, instead of a long list with
-    repeats. Same information, less to walk through -- 11 slots become 8
-    unique words here.
 
     Returns:
         Counter[str, int] -- word -> how many times it appears.
@@ -67,7 +62,7 @@ def to_letters(counts):
 
 
 def train(words, rounds):
-    """STEP 4 -- the merge loop  (this is the whole algorithm).
+    """STEP 4 -- merge the chars they apear together 
 
     Repeat:
         1. count every pair of NEIGHBOURS
@@ -153,7 +148,7 @@ def main():
     vocab = train(words, ROUNDS)
 
     for piece, piece_id in vocab.items():
-        print(f"   {piece!r:>8}  =  {piece_id}")
+        print(f"   {piece}  =  {piece_id}")
 
     for sample in ["the cat", "the rat sat"]:
         pieces = encode(sample, vocab)
